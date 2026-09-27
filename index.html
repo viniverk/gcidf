@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Encontre seu GC · Igreja dos Filhos</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --tinta:#000000; --ouro:#C9A227; --ouro-escuro:#7A5E0E;
+    --pedra:#EFEDE8; --linha:#D9D5CC; --branco:#FFFFFF; --erro:#A4271B;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--branco);color:var(--tinta);
+    font-family:"Barlow",system-ui,sans-serif;font-size:17px;line-height:1.5}
+  .wrap{max-width:560px;margin:0 auto;padding:0 18px 48px}
+  header{display:flex;align-items:center;gap:14px;padding:18px 0 10px}
+  header img{width:128px;height:auto;border-radius:10px;flex-shrink:0}
+  header h1{font-family:"Anton",Impact,sans-serif;font-weight:400;font-size:34px;line-height:1;margin:0;letter-spacing:.5px}
+  header p{margin:4px 0 0;color:var(--ouro-escuro);font-weight:600}
+  nav{display:flex;border-bottom:2px solid var(--tinta);margin:8px 0 22px}
+  nav button{flex:1;background:none;border:0;padding:12px 4px;font:600 16px "Barlow",sans-serif;color:#555;cursor:pointer;border-bottom:4px solid transparent;margin-bottom:-2px}
+  nav button[aria-selected="true"]{color:var(--tinta);border-bottom-color:var(--ouro)}
+  section[hidden]{display:none}
+  label{display:block;font-weight:600;margin:14px 0 6px}
+  label small{font-weight:400;color:#666}
+  input,select{width:100%;padding:13px 14px;font:500 17px "Barlow",sans-serif;border:2px solid var(--linha);border-radius:10px;background:var(--pedra);color:var(--tinta)}
+  input:focus,select:focus{outline:none;border-color:var(--ouro);background:var(--branco)}
+  button:focus-visible,a:focus-visible{outline:3px solid var(--ouro);outline-offset:2px}
+  .cep{font-family:"Anton",Impact,sans-serif;font-size:34px;letter-spacing:3px;text-align:center;padding:14px}
+  .linha2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:18px;padding:15px;border:0;border-radius:10px;background:var(--tinta);color:var(--branco);font:700 17px "Barlow",sans-serif;cursor:pointer;text-decoration:none}
+  .btn:disabled{opacity:.55;cursor:wait}
+  .btn.ouro{background:var(--ouro);color:var(--tinta)}
+  .btn.claro{background:var(--pedra);color:var(--tinta);border:2px solid var(--linha)}
+  .msg{margin:14px 0 0;padding:12px 14px;border-radius:10px;background:var(--pedra)}
+  .msg.erro{background:#F8E3E0;color:var(--erro)}
+  /* Placar: o elemento marcante */
+  .placar{margin-top:24px;background:var(--tinta);color:var(--branco);border-radius:16px;overflow:hidden}
+  .placar .topo{padding:20px 20px 16px}
+  .placar .de{margin:0;color:var(--ouro);font-weight:600}
+  .placar h2{font-family:"Anton",Impact,sans-serif;font-weight:400;font-size:44px;line-height:1.02;margin:6px 0 10px;overflow-wrap:anywhere}
+  .placar .info{margin:2px 0;color:#DDD}
+  .placar .faixa{display:flex;align-items:baseline;gap:10px;background:var(--ouro);color:var(--tinta);padding:12px 20px}
+  .placar .km{font-family:"Anton",Impact,sans-serif;font-size:52px;line-height:1}
+  .placar .acoes{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:16px 20px 20px}
+  .placar .acoes .btn{margin:0;background:#262626;color:var(--branco)}
+  .placar .acoes .btn.ouro{background:var(--ouro);color:var(--tinta)}
+  .mapa{height:280px;border-radius:14px;margin-top:16px;border:2px solid var(--linha)}
+  .linha-rua{display:grid;grid-template-columns:1fr 96px;gap:12px}
+  .opcoes{margin-top:14px}
+  .opcoes p{margin:0 0 8px;font-weight:600}
+  .opcao{display:block;width:100%;text-align:left;margin-bottom:8px;padding:12px 14px;border:2px solid var(--linha);border-radius:10px;background:var(--branco);font:500 16px "Barlow",sans-serif;color:var(--tinta);cursor:pointer}
+  .opcao[aria-pressed="true"]{border-color:var(--ouro);background:#FBF5E2}
+  .opcao small{display:block;color:#666}
+  h3{font-family:"Anton",Impact,sans-serif;font-weight:400;font-size:24px;margin:28px 0 8px}
+  ul.lista{list-style:none;padding:0;margin:0}
+  ul.lista li{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--linha)}
+  ul.lista strong{display:block}
+  ul.lista span.sub{color:#555;font-size:15px}
+  .dist{font-family:"Anton",Impact,sans-serif;font-size:22px;white-space:nowrap}
+  .sair{margin-left:auto;align-self:flex-start}
+  .x{background:none;border:0;color:var(--erro);font:600 15px "Barlow",sans-serif;cursor:pointer;padding:6px}
+  .vazio{padding:22px;border:2px dashed var(--linha);border-radius:14px;text-align:center;color:#444}
+  .aviso{font-size:15px;color:#555;margin-top:10px}
+  @media (prefers-reduced-motion:no-preference){.placar{animation:entra .35s ease-out}}
+  @keyframes entra{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="data:image/png;base64,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" alt="Igreja dos Filhos">
+    <div><h1>Encontre seu GC</h1></div>
+    <button class="x sair" id="sair" hidden>Sair</button>
+  </header>
+
+  <section id="tela-carregando"><p class="msg">Carregando...</p></section>
+
+  <section id="tela-login" hidden>
+    <form id="f-login">
+      <label for="l-email">E-mail</label>
+      <input id="l-email" type="email" autocomplete="username" required>
+      <label for="l-senha">Senha</label>
+      <input id="l-senha" type="password" autocomplete="current-password" required>
+      <button class="btn" id="l-entrar" type="submit">Entrar</button>
+    </form>
+    <div id="l-msg"></div>
+  </section>
+
+  <div id="app" hidden>
+
+  <nav role="tablist">
+    <button role="tab" aria-selected="true" data-aba="buscar">Buscar</button>
+    <button role="tab" aria-selected="false" data-aba="pessoas">Pessoas</button>
+    <button role="tab" aria-selected="false" data-aba="gcs">GCs</button>
+  </nav>
+
+  <!-- BUSCAR -->
+  <section id="aba-buscar">
+    <label for="b-cep">CEP da pessoa</label>
+    <input id="b-cep" class="cep" inputmode="numeric" placeholder="00000-000" maxlength="9" autocomplete="postal-code">
+    <div class="linha2">
+      <div><label for="b-nome">Nome <small>(opcional)</small></label><input id="b-nome" autocomplete="name"></div>
+      <div><label for="b-num">Número <small>(opcional)</small></label><input id="b-num" inputmode="numeric"></div>
+    </div>
+    <label for="b-tel">WhatsApp <small>(opcional)</small></label>
+    <input id="b-tel" inputmode="tel" placeholder="(11) 99999-9999">
+    <button class="btn" id="b-ir">Buscar GC mais próximo</button>
+    <div id="b-msg"></div>
+    <div id="b-res"></div>
+  </section>
+
+  <!-- PESSOAS -->
+  <section id="aba-pessoas" hidden>
+    <label for="p-filtro">Filtrar por GC</label>
+    <select id="p-filtro"></select>
+    <ul class="lista" id="p-lista"></ul>
+  </section>
+
+  <!-- GCS -->
+  <section id="aba-gcs" hidden>
+    <label for="g-nome">Nome do GC</label><input id="g-nome" placeholder="GC Vila Nova">
+    <div class="linha2">
+      <div><label for="g-lider">Líder</label><input id="g-lider"></div>
+      <div><label for="g-quando">Dia e horário</label><input id="g-quando" placeholder="Quarta, 20h"></div>
+    </div>
+    <div class="linha-rua">
+      <div><label for="g-rua">Rua</label><input id="g-rua" placeholder="Rua das Flores" autocomplete="off"></div>
+      <div><label for="g-num">Número</label><input id="g-num" inputmode="numeric"></div>
+    </div>
+    <label for="g-cidade">Cidade</label>
+    <input id="g-cidade" placeholder="São Paulo, SP">
+    <button class="btn claro" id="g-achar">Localizar endereço</button>
+    <div id="g-opcoes"></div>
+    <button class="btn ouro" id="g-add" hidden>Adicionar GC</button>
+    <div id="g-msg"></div>
+    <h3>GCs cadastrados</h3>
+    <div id="mapa-gcs" class="mapa"></div>
+    <ul class="lista" id="g-lista"></ul>
+  </section>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+import { getFirestore, collection, getDocs, doc, setDoc, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+/* ====== Configuração do Firebase (projeto gcidf-e6312) ====== */
+var firebaseConfig = {
+  apiKey: "AIzaSyD5VylY34QttVjcKEx7i8qoTDy-Tgt1pmc",
+  authDomain: "gcidf-e6312.firebaseapp.com",
+  projectId: "gcidf-e6312",
+  storageBucket: "gcidf-e6312.firebasestorage.app",
+  messagingSenderId: "782850380839",
+  appId: "1:782850380839:web:e4c94c8e17c33de48f2a02"
+};
+/* =============================================================== */
+
+var fbApp = initializeApp(firebaseConfig);
+var auth = getAuth(fbApp);
+var db = getFirestore(fbApp);
+setPersistence(auth, browserLocalPersistence);
+var dados = { gcs: [], pessoas: [] };
+var ultimaBusca = null;
+var mapa = null;
+var mapaGcs = null;
+var enderecoEscolhido = null;
+var opcoesEndereco = [];
+
+/* ---------- armazenamento (Firestore) ---------- */
+function semVazios(o) { return JSON.parse(JSON.stringify(o)); }
+async function carregar() {
+  var g = await getDocs(collection(db, 'gcs'));
+  var p = await getDocs(collection(db, 'pessoas'));
+  dados.gcs = g.docs.map(function (d) { return d.data(); });
+  dados.pessoas = p.docs.map(function (d) { return d.data(); })
+    .sort(function (a, b) { return (b.em || '').localeCompare(a.em || ''); });
+}
+async function gravar(colecao, obj) { await setDoc(doc(db, colecao, obj.id), semVazios(obj)); }
+async function apagar(colecao, id) { await deleteDoc(doc(db, colecao, id)); }
+function erroFirebase(e) {
+  if (e && e.code === 'permission-denied') return 'Sem permissão para salvar. Confira as regras do Firestore e o UID do admin.';
+  return 'Não consegui salvar no servidor. Verifique a internet e tente de novo.';
+}
+
+/* ---------- utilitários ---------- */
+function $(id) { return document.getElementById(id); }
+function digitos(s) { return (s || '').replace(/\D/g, ''); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function mascaraCep(el) { el.addEventListener('input', function () { var d = digitos(el.value).slice(0, 8); el.value = d.length > 5 ? d.slice(0,5) + '-' + d.slice(5) : d; }); }
+function km(n) { return n < 10 ? n.toFixed(1).replace('.', ',') : Math.round(n).toString(); }
+function msg(alvo, texto, erro) { $(alvo).innerHTML = texto ? '<p class="msg' + (erro ? ' erro' : '') + '">' + esc(texto) + '</p>' : ''; }
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+function distancia(a, b) {
+  var R = 6371, rad = Math.PI / 180;
+  var dLat = (b.lat - a.lat) * rad, dLng = (b.lng - a.lng) * rad;
+  var h = Math.sin(dLat/2)**2 + Math.cos(a.lat*rad) * Math.cos(b.lat*rad) * Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/* ---------- CEP -> endereço -> coordenadas ---------- */
+async function buscarJson(url) {
+  var r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+async function enderecoDoCep(cep) {
+  try {
+    var b = await buscarJson('https://brasilapi.com.br/api/cep/v2/' + cep);
+    var c = b.location && b.location.coordinates;
+    return { rua: b.street, bairro: b.neighborhood, cidade: b.city, uf: b.state,
+             coord: c && c.latitude ? { lat: +c.latitude, lng: +c.longitude } : null };
+  } catch (e) {
+    var v = await buscarJson('https://viacep.com.br/ws/' + cep + '/json/');
+    if (v.erro) throw new Error('CEP não encontrado');
+    return { rua: v.logradouro, bairro: v.bairro, cidade: v.localidade, uf: v.uf, coord: null };
+  }
+}
+async function nominatim(params) {
+  var q = new URLSearchParams(Object.assign({ format: 'json', limit: '1', countrycodes: 'br' }, params));
+  var r = await buscarJson('https://nominatim.openstreetmap.org/search?' + q.toString());
+  return r && r[0] ? { lat: +r[0].lat, lng: +r[0].lon } : null;
+}
+async function localizar(cep, numero) {
+  cep = digitos(cep);
+  if (cep.length !== 8) throw new Error('Digite um CEP com 8 números.');
+  var e = await enderecoDoCep(cep);
+  var texto = [e.rua && (e.rua + (numero ? ', ' + numero : '')), e.bairro, e.cidade && (e.cidade + '/' + e.uf)].filter(Boolean).join(' - ');
+  var p;
+  if (e.rua) { p = await nominatim({ street: (numero ? numero + ' ' : '') + e.rua, city: e.cidade, state: e.uf }); if (p) return { coord: p, texto: texto, precisao: 'rua' }; }
+  if (e.coord) return { coord: e.coord, texto: texto, precisao: 'rua' };
+  if (e.bairro) { p = await nominatim({ q: e.bairro + ', ' + e.cidade + ', ' + e.uf }); if (p) return { coord: p, texto: texto, precisao: 'bairro' }; }
+  p = await nominatim({ city: e.cidade, state: e.uf });
+  if (p) return { coord: p, texto: texto, precisao: 'cidade' };
+  throw new Error('Achei o endereço, mas não a localização no mapa. Tente outro CEP.');
+}
+
+/* ---------- abas ---------- */
+function trocarAba(nome) {
+  document.querySelectorAll('nav button').forEach(function (b) { b.setAttribute('aria-selected', b.dataset.aba === nome ? 'true' : 'false'); });
+  ['buscar', 'pessoas', 'gcs'].forEach(function (n) { $('aba-' + n).hidden = n !== nome; });
+  if (nome === 'pessoas') renderPessoas();
+  if (nome === 'gcs') setTimeout(renderGcs, 30);
+  if (nome === 'buscar' && mapa) setTimeout(function () { mapa.invalidateSize(); }, 50);
+}
+
+/* ---------- busca ---------- */
+async function buscar() {
+  msg('b-msg', ''); $('b-res').innerHTML = '';
+  if (!dados.gcs.length) { msg('b-msg', 'Nenhum GC cadastrado ainda. Adicione os GCs na aba GCs.', true); return; }
+  var btn = $('b-ir'); btn.disabled = true; btn.textContent = 'Buscando...';
+  try {
+    var loc = await localizar($('b-cep').value, $('b-num').value.trim());
+    var ranking = dados.gcs.map(function (g) { return { gc: g, km: distancia(loc.coord, g) }; })
+                           .sort(function (a, b) { return a.km - b.km; });
+    ultimaBusca = { loc: loc, ranking: ranking };
+    renderResultado();
+  } catch (e) {
+    msg('b-msg', e.message === 'Failed to fetch' ? 'Não consegui acessar a busca de CEP. Verifique a internet e tente de novo.' : e.message, true);
+  } finally { btn.disabled = false; btn.textContent = 'Buscar GC mais próximo'; }
+}
+
+function renderResultado() {
+  var r = ultimaBusca, top = r.ranking[0], g = top.gc, o = r.loc.coord;
+  var rota = 'https://www.google.com/maps/dir/?api=1&origin=' + o.lat + ',' + o.lng + '&destination=' + g.lat + ',' + g.lng;
+  var tel = digitos($('b-tel').value), nome = $('b-nome').value.trim();
+  var texto = 'Olá' + (nome ? ' ' + nome.split(' ')[0] : '') + '! O GC mais perto de você é o ' + g.nome +
+              (g.quando ? ', ' + g.quando : '') + (g.lider ? ', com ' + g.lider : '') + '. Endereço: ' + g.endereco + '. Rota: ' + rota;
+  var wpp = 'https://wa.me/' + (tel ? (tel.length <= 11 ? '55' + tel : tel) : '') + '?text=' + encodeURIComponent(texto);
+  var aviso = r.loc.precisao === 'rua' ? '' :
+    '<p class="aviso">Localizei só pelo ' + r.loc.precisao + ' deste CEP, então a distância é aproximada.</p>';
+
+  var html =
+    '<div class="placar">' +
+      '<div class="topo"><p class="de">GC mais próximo de ' + esc(r.loc.texto) + '</p>' +
+        '<h2>' + esc(g.nome) + '</h2>' +
+        (g.lider ? '<p class="info">Líder: ' + esc(g.lider) + '</p>' : '') +
+        (g.quando ? '<p class="info">' + esc(g.quando) + '</p>' : '') +
+        '<p class="info">' + esc(g.endereco) + '</p></div>' +
+      '<div class="faixa"><span class="km">' + km(top.km) + '</span><span>km em linha reta</span></div>' +
+      '<div class="acoes"><a class="btn" href="' + rota + '" target="_blank" rel="noopener">Como chegar</a>' +
+        '<a class="btn" href="' + wpp + '" target="_blank" rel="noopener">Enviar no WhatsApp</a></div>' +
+    '</div>' + aviso +
+    '<button class="btn ouro" id="b-salvar">Salvar pessoa neste GC</button>' +
+    '<div id="mapa" class="mapa"></div>';
+
+  if (r.ranking.length > 1) {
+    html += '<h3>Outras opções</h3><ul class="lista">' + r.ranking.slice(1, 4).map(function (x) {
+      return '<li><div><strong>' + esc(x.gc.nome) + '</strong><span class="sub">' + esc(x.gc.quando || x.gc.endereco) + '</span></div><span class="dist">' + km(x.km) + ' km</span></li>';
+    }).join('') + '</ul>';
+  }
+  $('b-res').innerHTML = html;
+  $('b-salvar').addEventListener('click', salvarPessoa);
+  desenharMapa(o, r.ranking);
+}
+
+function desenharMapa(origem, ranking) {
+  if (!window.L) { $('mapa').remove(); return; }
+  if (mapa) { mapa.remove(); mapa = null; }
+  mapa = novoMapa('mapa');
+  ranking.forEach(function (x, i) { marcarGc(mapa, x.gc, i === 0); });
+  L.circleMarker([origem.lat, origem.lng], { radius: 9, color: '#000', fillColor: '#fff', fillOpacity: 1, weight: 3 }).addTo(mapa).bindPopup('Pessoa');
+  var foco = [[origem.lat, origem.lng], [ranking[0].gc.lat, ranking[0].gc.lng]];
+  mapa.fitBounds(foco, { padding: [40, 40], maxZoom: 15 });
+}
+
+async function salvarPessoa() {
+  var r = ultimaBusca, nome = $('b-nome').value.trim();
+  if (!nome) { msg('b-msg', 'Preencha o nome para salvar a pessoa.', true); $('b-nome').focus(); return; }
+  var p = { id: uid(), nome: nome, tel: $('b-tel').value.trim(), cep: $('b-cep').value,
+    endereco: r.loc.texto, gcId: r.ranking[0].gc.id, km: r.ranking[0].km, em: new Date().toISOString() };
+  try { await gravar('pessoas', p); } catch (e) { msg('b-msg', erroFirebase(e), true); return; }
+  dados.pessoas.unshift(p);
+  msg('b-msg', nome + ' foi salvo no ' + r.ranking[0].gc.nome + '.');
+  ['b-cep', 'b-nome', 'b-num', 'b-tel'].forEach(function (id) { $(id).value = ''; });
+  $('b-res').innerHTML = ''; ultimaBusca = null;
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/* ---------- pessoas ---------- */
+function nomeGc(id) { var g = dados.gcs.find(function (x) { return x.id === id; }); return g ? g.nome : 'GC removido'; }
+function renderPessoas() {
+  var f = $('p-filtro'), atual = f.value;
+  f.innerHTML = '<option value="">Todos os GCs</option>' + dados.gcs.map(function (g) { return '<option value="' + g.id + '">' + esc(g.nome) + '</option>'; }).join('');
+  f.value = atual;
+  var lista = dados.pessoas.filter(function (p) { return !f.value || p.gcId === f.value; });
+  $('p-lista').innerHTML = lista.length ? lista.map(function (p) {
+    return '<li><div><strong>' + esc(p.nome) + '</strong><span class="sub">' + esc(nomeGc(p.gcId)) + ' – ' + km(p.km) + ' km' + (p.tel ? ' – ' + esc(p.tel) : '') + '</span></div>' +
+           '<button class="x" data-del-pessoa="' + p.id + '">Remover</button></li>';
+  }).join('') : '<li class="vazio" style="display:block">Ninguém salvo ainda. Busque um CEP e toque em "Salvar pessoa neste GC".</li>';
+}
+
+/* ---------- GCs ---------- */
+function resumoEndereco(r) {
+  var a = r.address || {};
+  var rua = a.road || a.pedestrian || a.residential || (r.display_name || '').split(',')[0];
+  var linha1 = rua + (a.house_number ? ', ' + a.house_number : '');
+  var bairro = a.suburb || a.neighbourhood || a.quarter || a.city_district || '';
+  var cidade = a.city || a.town || a.village || a.municipality || '';
+  var uf = (a['ISO3166-2-lvl4'] || '').replace('BR-', '');
+  return { linha1: linha1, linha2: [bairro, cidade + (uf ? '/' + uf : '')].filter(Boolean).join(' - '), temNumero: !!a.house_number };
+}
+
+async function acharEnderecoGc() {
+  var rua = $('g-rua').value.trim(), num = $('g-num').value.trim(), cidade = $('g-cidade').value.trim();
+  msg('g-msg', ''); $('g-opcoes').innerHTML = ''; $('g-add').hidden = true; enderecoEscolhido = null;
+  if (!rua || !cidade) { msg('g-msg', 'Preencha a rua e a cidade.', true); return; }
+  var btn = $('g-achar'); btn.disabled = true; btn.textContent = 'Localizando...';
+  try {
+    var base = { format: 'json', addressdetails: '1', countrycodes: 'br', limit: '5' };
+    var q = new URLSearchParams(Object.assign({}, base, { q: rua + (num ? ', ' + num : '') + ', ' + cidade }));
+    var res = await buscarJson('https://nominatim.openstreetmap.org/search?' + q.toString());
+    if (!res.length && num) {
+      q = new URLSearchParams(Object.assign({}, base, { q: rua + ', ' + cidade }));
+      res = await buscarJson('https://nominatim.openstreetmap.org/search?' + q.toString());
+    }
+    if (!res.length) throw new Error('Não achei esse endereço. Confira o nome da rua e a cidade.');
+    opcoesEndereco = res.map(function (r) {
+      var s = resumoEndereco(r);
+      return { lat: +r.lat, lng: +r.lon, texto: s.linha1 + (s.linha2 ? ' - ' + s.linha2 : ''), s: s };
+    });
+    $('g-opcoes').innerHTML = '<div class="opcoes"><p>' + (opcoesEndereco.length > 1 ? 'Toque no endereço certo' : 'Endereço encontrado') + '</p>' +
+      opcoesEndereco.map(function (o, i) {
+        return '<button class="opcao" data-opcao="' + i + '" aria-pressed="' + (i === 0) + '">' + esc(o.s.linha1) + '<small>' + esc(o.s.linha2) + '</small></button>';
+      }).join('') + '</div>';
+    escolherEndereco(0);
+    if (num && !opcoesEndereco[0].s.temNumero)
+      msg('g-msg', 'O mapa não tem o número ' + num + ' dessa rua. O GC vai ficar marcado no meio da rua, o que já serve para calcular a distância.');
+  } catch (e) {
+    msg('g-msg', e.message === 'Failed to fetch' ? 'Não consegui acessar a busca de endereço. Verifique a internet e tente de novo.' : e.message, true);
+  } finally { btn.disabled = false; btn.textContent = 'Localizar endereço'; }
+}
+
+function escolherEndereco(i) {
+  enderecoEscolhido = opcoesEndereco[i];
+  document.querySelectorAll('.opcao').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.opcao == i ? 'true' : 'false'); });
+  $('g-add').hidden = false;
+}
+
+async function adicionarGc() {
+  var nome = $('g-nome').value.trim();
+  if (!nome) { msg('g-msg', 'Dê um nome ao GC.', true); $('g-nome').focus(); return; }
+  if (!enderecoEscolhido) { msg('g-msg', 'Localize o endereço antes de adicionar.', true); return; }
+  var e = enderecoEscolhido, num = $('g-num').value.trim();
+  var texto = e.s.temNumero || !num ? e.texto : e.s.linha1 + ', ' + num + (e.s.linha2 ? ' - ' + e.s.linha2 : '');
+  var g = { id: uid(), nome: nome, lider: $('g-lider').value.trim(), quando: $('g-quando').value.trim(),
+    endereco: texto, lat: e.lat, lng: e.lng };
+  try { await gravar('gcs', g); } catch (x) { msg('g-msg', erroFirebase(x), true); return; }
+  dados.gcs.push(g);
+  ['g-nome', 'g-lider', 'g-quando', 'g-rua', 'g-num'].forEach(function (id) { $(id).value = ''; });
+  $('g-opcoes').innerHTML = ''; $('g-add').hidden = true; enderecoEscolhido = null;
+  try { localStorage.setItem('gc-finder-cidade', $('g-cidade').value.trim()); } catch (x) {}
+  msg('g-msg', nome + ' adicionado.');
+  renderGcs();
+}
+
+function renderGcs() {
+  $('g-lista').innerHTML = dados.gcs.length ? dados.gcs.map(function (g) {
+    var n = dados.pessoas.filter(function (p) { return p.gcId === g.id; }).length;
+    return '<li><div><strong>' + esc(g.nome) + '</strong><span class="sub">' + esc(g.endereco) + '<br>' +
+           n + (n === 1 ? ' pessoa' : ' pessoas') + '</span></div>' +
+           '<button class="x" data-del-gc="' + g.id + '">Remover</button></li>';
+  }).join('') : '<li class="vazio" style="display:block">Nenhum GC ainda. Cadastre o primeiro acima.</li>';
+  desenharMapaGcs();
+}
+
+function novoMapa(id) {
+  var m = L.map(id, { scrollWheelZoom: false });
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(m);
+  return m;
+}
+function marcarGc(m, g, destaque) {
+  L.circleMarker([g.lat, g.lng], { radius: destaque ? 11 : 8, color: '#000', fillColor: destaque ? '#C9A227' : '#8A8A8A', fillOpacity: 1, weight: 2 })
+    .addTo(m).bindPopup('<strong>' + esc(g.nome) + '</strong><br>' + esc(g.quando || '') + (g.lider ? '<br>' + esc(g.lider) : ''));
+}
+function desenharMapaGcs() {
+  var el = $('mapa-gcs');
+  if (!window.L || !dados.gcs.length) { el.hidden = true; return; }
+  el.hidden = false;
+  if (mapaGcs) { mapaGcs.remove(); mapaGcs = null; }
+  mapaGcs = novoMapa('mapa-gcs');
+  dados.gcs.forEach(function (g) { marcarGc(mapaGcs, g, true); });
+  mapaGcs.fitBounds(dados.gcs.map(function (g) { return [g.lat, g.lng]; }), { padding: [30, 30], maxZoom: 15 });
+}
+
+/* ---------- eventos ---------- */
+document.addEventListener('click', async function (ev) {
+  var t = ev.target;
+  var op = t.closest && t.closest('[data-opcao]');
+  if (op) escolherEndereco(+op.dataset.opcao);
+  if (t.dataset.aba) trocarAba(t.dataset.aba);
+  if (t.dataset.delGc && confirm('Remover este GC?')) {
+    try { await apagar('gcs', t.dataset.delGc); } catch (e) { alert(erroFirebase(e)); return; }
+    dados.gcs = dados.gcs.filter(function (g) { return g.id !== t.dataset.delGc; }); renderGcs();
+  }
+  if (t.dataset.delPessoa && confirm('Remover esta pessoa?')) {
+    try { await apagar('pessoas', t.dataset.delPessoa); } catch (e) { alert(erroFirebase(e)); return; }
+    dados.pessoas = dados.pessoas.filter(function (p) { return p.id !== t.dataset.delPessoa; }); renderPessoas();
+  }
+});
+$('b-ir').addEventListener('click', buscar);
+$('b-cep').addEventListener('keydown', function (e) { if (e.key === 'Enter') buscar(); });
+$('g-add').addEventListener('click', adicionarGc);
+$('p-filtro').addEventListener('change', renderPessoas);
+mascaraCep($('b-cep'));
+$('g-achar').addEventListener('click', acharEnderecoGc);
+$('g-rua').addEventListener('keydown', function (e) { if (e.key === 'Enter') acharEnderecoGc(); });
+['g-rua', 'g-num', 'g-cidade'].forEach(function (id) { $(id).addEventListener('input', function () { $('g-add').hidden = true; enderecoEscolhido = null; $('g-opcoes').innerHTML = ''; }); });
+
+/* ---------- login ---------- */
+function mostrarTela(qual) {
+  $('tela-carregando').hidden = qual !== 'carregando';
+  $('tela-login').hidden = qual !== 'login';
+  $('app').hidden = qual !== 'app';
+  $('sair').hidden = qual !== 'app';
+}
+
+$('f-login').addEventListener('submit', async function (ev) {
+  ev.preventDefault();
+  msg('l-msg', '');
+  var btn = $('l-entrar'); btn.disabled = true; btn.textContent = 'Entrando...';
+  try {
+    await signInWithEmailAndPassword(auth, $('l-email').value.trim(), $('l-senha').value);
+  } catch (e) {
+    var c = e.code || '';
+    msg('l-msg', c === 'auth/too-many-requests' ? 'Muitas tentativas. Espere alguns minutos e tente de novo.'
+      : c === 'auth/network-request-failed' ? 'Sem conexão com o servidor. Verifique a internet.'
+      : 'E-mail ou senha incorretos.', true);
+  } finally { btn.disabled = false; btn.textContent = 'Entrar'; }
+});
+
+$('sair').addEventListener('click', function () { signOut(auth); });
+
+onAuthStateChanged(auth, async function (user) {
+  if (!user) {
+    dados = { gcs: [], pessoas: [] };
+    $('b-res').innerHTML = ''; $('l-senha').value = '';
+    mostrarTela('login');
+    return;
+  }
+  mostrarTela('carregando');
+  try {
+    await carregar();
+  } catch (e) {
+    await signOut(auth);
+    msg('l-msg', e.code === 'permission-denied' ? 'Esta conta não tem acesso aos dados.' : 'Não consegui carregar os dados. Tente de novo.', true);
+    return;
+  }
+  try { var c = localStorage.getItem('gc-finder-cidade'); if (c) $('g-cidade').value = c; } catch (x) {}
+  mostrarTela('app');
+  trocarAba('buscar');
+});
+</script>
+</body>
+</html>
