@@ -43,7 +43,8 @@
   .placar .de{margin:0;color:var(--ouro);font-weight:600}
   .placar h2{font-family:"Anton",Impact,sans-serif;font-weight:400;font-size:44px;line-height:1.02;margin:6px 0 10px;overflow-wrap:anywhere}
   .placar .info{margin:2px 0;color:#DDD}
-  .placar .faixa{display:flex;align-items:baseline;gap:10px;background:var(--ouro);color:var(--tinta);padding:12px 20px}
+  .placar .faixa{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;background:var(--ouro);color:var(--tinta);padding:12px 20px}
+  .placar .faixa .extra{flex-basis:100%;font-size:15px;font-weight:600}
   .placar .km{font-family:"Anton",Impact,sans-serif;font-size:52px;line-height:1}
   .placar .acoes{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:16px 20px 20px}
   .placar .acoes .btn{margin:0;background:#262626;color:var(--branco)}
@@ -286,11 +287,44 @@ async function buscar() {
     if (!loc) throw new Error(rua || cidade ? 'Não achei esse endereço. Confira a rua e a cidade, ou use o CEP.' : 'Informe o CEP ou a rua e a cidade.');
     var ranking = dados.gcs.map(function (g) { return { gc: g, km: distancia(loc.coord, g) }; })
                            .sort(function (a, b) { return a.km - b.km; });
-    ultimaBusca = { loc: loc, ranking: ranking };
+    btn.textContent = 'Calculando trajetos...';
+    var comRotas = await aplicarRotas(loc.coord, ranking);
+    ultimaBusca = { loc: loc, ranking: comRotas.ranking, comRota: comRotas.comRota };
     renderResultado();
   } catch (e) {
     msg('b-msg', e.message === 'Failed to fetch' ? 'Não consegui acessar a busca de CEP. Verifique a internet e tente de novo.' : e.message, true);
   } finally { btn.disabled = false; btn.textContent = 'Buscar GC mais próximo'; }
+}
+
+/* ---------- distância pelo trajeto (OpenStreetMap / OSRM) ---------- */
+function minutos(seg) {
+  var m = Math.round(seg / 60);
+  return m < 60 ? m + ' min' : Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0');
+}
+async function rotaOsrm(perfil, a, b, comLinha) {
+  var srv = perfil === 'pe' ? 'routed-foot/route/v1/driving/' : 'routed-car/route/v1/driving/';
+  var url = 'https://routing.openstreetmap.de/' + srv + a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat +
+            '?overview=' + (comLinha ? 'full&geometries=geojson' : 'false');
+  var ctl = new AbortController(), tempo = setTimeout(function () { ctl.abort(); }, 8000);
+  try {
+    var r = await fetch(url, { signal: ctl.signal });
+    var d = await r.json();
+    if (d.code !== 'Ok' || !d.routes || !d.routes[0]) return null;
+    var rt = d.routes[0];
+    return { km: rt.distance / 1000, seg: rt.duration, linha: comLinha ? rt.geometry.coordinates : null };
+  } catch (e) { return null; } finally { clearTimeout(tempo); }
+}
+/* calcula o trajeto de carro para os 5 GCs mais próximos em linha reta e reordena pelo trajeto */
+async function aplicarRotas(origem, ranking) {
+  var candidatos = ranking.slice(0, 5);
+  var rotas = await Promise.all(candidatos.map(function (x) { return rotaOsrm('carro', origem, x.gc, true); }));
+  candidatos.forEach(function (x, i) { x.carro = rotas[i]; });
+  var algum = rotas.some(function (r) { return r; });
+  if (algum) {
+    candidatos.sort(function (a, b) { return (a.carro ? a.carro.km : 1e9) - (b.carro ? b.carro.km : 1e9); });
+    candidatos[0].pe = await rotaOsrm('pe', origem, candidatos[0].gc, false);
+  }
+  return { ranking: candidatos.concat(ranking.slice(5)), comRota: algum };
 }
 
 function renderResultado() {
@@ -300,11 +334,11 @@ function renderResultado() {
   var texto = 'Olá' + (nome ? ' ' + nome.split(' ')[0] : '') + '! O GC mais perto de você é o ' + g.nome +
               (g.quando ? ', ' + g.quando : '') + (g.lider ? ', com ' + g.lider : '') + '. Endereço: ' + g.endereco + '. Rota: ' + rota;
   var wpp = 'https://wa.me/' + (tel ? (tel.length <= 11 ? '55' + tel : tel) : '') + '?text=' + encodeURIComponent(texto);
-  var aviso = '';
+  var aviso = r.comRota ? '' : '<p class="aviso">Não consegui calcular o trajeto agora, então mostrei a distância em linha reta. Toque em "Como chegar" para ver o caminho.</p>';
   if (r.loc.precisao === 'bairro' || r.loc.precisao === 'cidade')
-    aviso = '<p class="aviso">Localizei só pelo ' + r.loc.precisao + ' deste CEP, então a distância é aproximada. Coloque a rua e o número para ficar mais certo.</p>';
+    aviso += '<p class="aviso">Localizei só pelo ' + r.loc.precisao + ' deste CEP, então a distância é aproximada. Coloque a rua e o número para ficar mais certo.</p>';
   else if (r.loc.precisao === 'rua' && r.loc.numPedido)
-    aviso = '<p class="aviso">O mapa não tem o número ' + esc(r.loc.numPedido) + ' dessa rua, usei o meio da rua para calcular.</p>';
+    aviso += '<p class="aviso">O mapa não tem o número ' + esc(r.loc.numPedido) + ' dessa rua, usei o meio da rua para calcular.</p>';
 
   var html =
     '<div class="placar">' +
@@ -313,7 +347,10 @@ function renderResultado() {
         (g.lider ? '<p class="info">Líder: ' + esc(g.lider) + '</p>' : '') +
         (g.quando ? '<p class="info">' + esc(g.quando) + '</p>' : '') +
         '<p class="info">' + esc(g.endereco) + '</p></div>' +
-      '<div class="faixa"><span class="km">' + km(top.km) + '</span><span>km em linha reta</span></div>' +
+      (top.carro
+        ? '<div class="faixa"><span class="km">' + km(top.carro.km) + '</span><span>km de carro, cerca de ' + minutos(top.carro.seg) + '</span>' +
+            '<span class="extra">' + km(top.km) + ' km em linha reta' + (top.pe ? ', ' + km(top.pe.km) + ' km a pé (cerca de ' + minutos(top.pe.seg) + ')' : '') + '</span></div>'
+        : '<div class="faixa"><span class="km">' + km(top.km) + '</span><span>km em linha reta</span></div>') +
       '<div class="acoes"><a class="btn" href="' + rota + '" target="_blank" rel="noopener">Como chegar</a>' +
         '<a class="btn" href="' + wpp + '" target="_blank" rel="noopener">Enviar no WhatsApp</a></div>' +
     '</div>' + aviso +
@@ -321,8 +358,8 @@ function renderResultado() {
     '<div id="mapa" class="mapa"></div>';
 
   if (r.ranking.length > 1) {
-    html += '<h3>Outras opções</h3><ul class="lista">' + r.ranking.slice(1, 4).map(function (x) {
-      return '<li><div><strong>' + esc(x.gc.nome) + '</strong><span class="sub">' + esc(x.gc.quando || x.gc.endereco) + '</span></div><span class="dist">' + km(x.km) + ' km</span></li>';
+    html += '<h3>Outras opções</h3>' + (r.comRota ? '<p class="aviso" style="margin-top:0">Distância de carro pelo trajeto.</p>' : '') + '<ul class="lista">' + r.ranking.slice(1, 4).map(function (x) {
+      return '<li><div><strong>' + esc(x.gc.nome) + '</strong><span class="sub">' + esc(x.gc.quando || x.gc.endereco) + '</span></div><span class="dist">' + km(x.carro ? x.carro.km : x.km) + ' km</span></li>';
     }).join('') + '</ul>';
   }
   $('b-res').innerHTML = html;
@@ -337,6 +374,11 @@ function desenharMapa(origem, ranking) {
   ranking.forEach(function (x, i) { marcarGc(mapa, x.gc, i === 0); });
   L.circleMarker([origem.lat, origem.lng], { radius: 9, color: '#000', fillColor: '#fff', fillOpacity: 1, weight: 3 }).addTo(mapa).bindPopup('Pessoa');
   var foco = [[origem.lat, origem.lng], [ranking[0].gc.lat, ranking[0].gc.lng]];
+  if (ranking[0].carro && ranking[0].carro.linha) {
+    var linha = ranking[0].carro.linha.map(function (c) { return [c[1], c[0]]; });
+    L.polyline(linha, { color: '#000', weight: 5, opacity: .75 }).addTo(mapa);
+    foco = linha;
+  }
   mapa.fitBounds(foco, { padding: [40, 40], maxZoom: 15 });
 }
 
@@ -344,7 +386,7 @@ async function salvarPessoa() {
   var r = ultimaBusca, nome = $('b-nome').value.trim();
   if (!nome) { msg('b-msg', 'Preencha o nome para salvar a pessoa.', true); $('b-nome').focus(); return; }
   var p = { id: uid(), nome: nome, tel: $('b-tel').value.trim(), cep: $('b-cep').value,
-    endereco: r.loc.texto, gcId: r.ranking[0].gc.id, km: r.ranking[0].km, em: new Date().toISOString() };
+    endereco: r.loc.texto, gcId: r.ranking[0].gc.id, km: r.ranking[0].carro ? r.ranking[0].carro.km : r.ranking[0].km, kmReta: r.ranking[0].km, em: new Date().toISOString() };
   try { await gravar('pessoas', p); } catch (e) { msg('b-msg', erroFirebase(e), true); return; }
   dados.pessoas.unshift(p);
   msg('b-msg', nome + ' foi salvo no ' + r.ranking[0].gc.nome + '.');
