@@ -51,6 +51,12 @@
   .placar .acoes .btn.ouro{background:var(--ouro);color:var(--tinta)}
   .mapa{height:280px;border-radius:14px;margin-top:16px;border:2px solid var(--linha)}
   .mapa.grande{height:calc(100vh - 230px);min-height:380px;margin-top:0}
+  .dias{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+  .dia{flex:1 0 auto;min-width:44px;padding:10px 8px;border:2px solid var(--linha);border-radius:999px;background:var(--branco);font:600 15px "Barlow",sans-serif;color:var(--tinta);cursor:pointer}
+  .dia[aria-pressed="true"]{background:var(--tinta);border-color:var(--tinta);color:var(--branco)}
+  .editando{margin:0 0 6px;padding:10px 14px;border-radius:10px;background:#FBF5E2;font-weight:600}
+  .acoes-item{display:flex;gap:2px;flex-shrink:0}
+  .x.editar{color:var(--tinta)}
   .linha-rua{display:grid;grid-template-columns:1fr 96px;gap:12px}
   .opcoes{margin-top:14px}
   .opcoes p{margin:0 0 8px;font-weight:600}
@@ -116,6 +122,8 @@
       <div><label for="b-nome">Nome <small>(opcional)</small></label><input id="b-nome" autocomplete="name"></div>
       <div><label for="b-tel">WhatsApp <small>(opcional)</small></label><input id="b-tel" inputmode="tel" placeholder="(11) 99999-9999"></div>
     </div>
+    <label>Dia do GC <small>(nenhum marcado = todos os dias)</small></label>
+    <div class="dias" id="b-dias"></div>
     <button class="btn" id="b-ir">Buscar GC mais próximo</button>
     <div id="b-msg"></div>
     <div id="b-res"></div>
@@ -136,10 +144,12 @@
 
   <!-- GCS -->
   <section id="aba-gcs" hidden>
+    <p class="editando" id="g-editando" hidden></p>
     <label for="g-nome">Nome do GC</label><input id="g-nome" placeholder="GC Vila Nova">
+    <label for="g-lider">Líder</label><input id="g-lider">
     <div class="linha2">
-      <div><label for="g-lider">Líder</label><input id="g-lider"></div>
-      <div><label for="g-quando">Dia e horário</label><input id="g-quando" placeholder="Quarta, 20h"></div>
+      <div><label for="g-dia">Dia da semana</label><select id="g-dia"></select></div>
+      <div><label for="g-hora">Horário</label><select id="g-hora"></select></div>
     </div>
     <label for="g-cep">CEP <small>(opcional, preenche a rua e a cidade)</small></label>
     <input id="g-cep" inputmode="numeric" placeholder="00000-000" maxlength="9">
@@ -152,6 +162,7 @@
     <button class="btn claro" id="g-achar">Localizar endereço</button>
     <div id="g-opcoes"></div>
     <button class="btn ouro" id="g-add" hidden>Adicionar GC</button>
+    <button class="btn claro" id="g-cancelar" hidden>Cancelar edição</button>
     <div id="g-msg"></div>
     <h3>GCs cadastrados</h3>
     <ul class="lista" id="g-lista"></ul>
@@ -201,6 +212,34 @@ async function apagar(colecao, id) { await deleteDoc(doc(db, colecao, id)); }
 function erroFirebase(e) {
   if (e && e.code === 'permission-denied') return 'Sem permissão para salvar. Confira as regras do Firestore e o UID do admin.';
   return 'Não consegui salvar no servidor. Verifique a internet e tente de novo.';
+}
+
+/* ---------- dias e horários ---------- */
+var DIAS = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
+var DIAS_CURTOS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
+var diasFiltro = [];
+var editando = null;
+function diaDoGc(g) {
+  if (g.dia) return g.dia;
+  var q = (g.quando || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  for (var i = 0; i < DIAS.length; i++) {
+    var d = DIAS[i].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (q.indexOf(d.slice(0, 3)) !== -1) return DIAS[i];
+  }
+  return '';
+}
+function quandoDe(dia, hora) { return [dia, hora].filter(Boolean).join(', '); }
+function montarSelects() {
+  $('g-dia').innerHTML = '<option value="">Escolha</option>' + DIAS.map(function (d) { return '<option>' + d + '</option>'; }).join('');
+  var horas = ['<option value="">Escolha</option>'];
+  for (var m = 6 * 60; m <= 22 * 60; m += 30) {
+    var h = String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+    horas.push('<option>' + h + '</option>');
+  }
+  $('g-hora').innerHTML = horas.join('');
+  $('b-dias').innerHTML = DIAS.map(function (d, i) {
+    return '<button class="dia" type="button" data-dia="' + d + '" aria-pressed="false" title="' + d + '">' + DIAS_CURTOS[i] + '</button>';
+  }).join('');
 }
 
 /* ---------- utilitários ---------- */
@@ -267,9 +306,39 @@ function trocarAba(nome) {
 }
 
 /* ---------- busca ---------- */
+function gcsDoFiltro() {
+  return dados.gcs.filter(function (g) { return !diasFiltro.length || diasFiltro.indexOf(diaDoGc(g)) !== -1; });
+}
+function textoDias() {
+  if (!diasFiltro.length) return '';
+  var nomes = diasFiltro.map(function (d) { return (d === 'Sábado' || d === 'Domingo' ? 'no ' : 'na ') + d.toLowerCase(); });
+  return nomes.length === 1 ? nomes[0] : nomes.slice(0, -1).join(', ') + ' ou ' + nomes[nomes.length - 1];
+}
+async function calcularResultado(loc) {
+  var ranking = gcsDoFiltro().map(function (g) { return { gc: g, km: distancia(loc.coord, g) }; })
+                             .sort(function (a, b) { return a.km - b.km; });
+  var comRotas = await aplicarRotas(loc.coord, ranking);
+  ultimaBusca = { loc: loc, ranking: comRotas.ranking, comRota: comRotas.comRota };
+  renderResultado();
+}
+/* ao marcar/desmarcar um dia com um resultado na tela, refaz o ranking sem buscar o endereço de novo */
+async function alternarDia(d) {
+  var i = diasFiltro.indexOf(d);
+  if (i === -1) diasFiltro.push(d); else diasFiltro.splice(i, 1);
+  diasFiltro.sort(function (a, b) { return DIAS.indexOf(a) - DIAS.indexOf(b); });
+  document.querySelectorAll('.dia').forEach(function (b) { b.setAttribute('aria-pressed', diasFiltro.indexOf(b.dataset.dia) !== -1 ? 'true' : 'false'); });
+  if (!ultimaBusca) return;
+  var loc = ultimaBusca.loc;
+  msg('b-msg', '');
+  if (!gcsDoFiltro().length) { $('b-res').innerHTML = ''; msg('b-msg', 'Nenhum GC cadastrado ' + textoDias() + '.', true); return; }
+  $('b-res').innerHTML = '<p class="msg">Atualizando...</p>';
+  await calcularResultado(loc);
+}
+
 async function buscar() {
   msg('b-msg', ''); $('b-res').innerHTML = '';
   if (!dados.gcs.length) { msg('b-msg', 'Nenhum GC cadastrado ainda. Adicione os GCs na aba GCs.', true); return; }
+  if (!gcsDoFiltro().length) { msg('b-msg', 'Nenhum GC cadastrado ' + textoDias() + '.', true); return; }
   var btn = $('b-ir'); btn.disabled = true; btn.textContent = 'Buscando...';
   try {
     var cep = $('b-cep').value, rua = $('b-rua').value.trim(), num = $('b-num').value.trim(), cidade = $('b-cidade').value.trim();
@@ -285,12 +354,8 @@ async function buscar() {
     }
     if (!loc && digitos(cep).length === 8) loc = await localizar(cep, num);
     if (!loc) throw new Error(rua || cidade ? 'Não achei esse endereço. Confira a rua e a cidade, ou use o CEP.' : 'Informe o CEP ou a rua e a cidade.');
-    var ranking = dados.gcs.map(function (g) { return { gc: g, km: distancia(loc.coord, g) }; })
-                           .sort(function (a, b) { return a.km - b.km; });
     btn.textContent = 'Calculando trajetos...';
-    var comRotas = await aplicarRotas(loc.coord, ranking);
-    ultimaBusca = { loc: loc, ranking: comRotas.ranking, comRota: comRotas.comRota };
-    renderResultado();
+    await calcularResultado(loc);
   } catch (e) {
     msg('b-msg', e.message === 'Failed to fetch' ? 'Não consegui acessar a busca de CEP. Verifique a internet e tente de novo.' : e.message, true);
   } finally { btn.disabled = false; btn.textContent = 'Buscar GC mais próximo'; }
@@ -342,7 +407,7 @@ function renderResultado() {
 
   var html =
     '<div class="placar">' +
-      '<div class="topo"><p class="de">GC mais próximo de ' + esc(r.loc.texto) + '</p>' +
+      '<div class="topo"><p class="de">GC mais próximo ' + (diasFiltro.length ? esc(textoDias()) + ' ' : '') + 'de ' + esc(r.loc.texto) + '</p>' +
         '<h2>' + esc(g.nome) + '</h2>' +
         (g.lider ? '<p class="info">Líder: ' + esc(g.lider) + '</p>' : '') +
         (g.quando ? '<p class="info">' + esc(g.quando) + '</p>' : '') +
@@ -441,7 +506,7 @@ function autoCep(p) {
       if (e.rua) $(p + '-rua').value = e.rua;
       if (e.cidade) $(p + '-cidade').value = e.cidade + (e.uf ? ', ' + e.uf : '');
       msg(alvoMsg, e.rua ? '' : 'Esse CEP é da cidade toda. Digite o nome da rua.');
-      if (p === 'g') { $('g-add').hidden = true; enderecoEscolhido = null; $('g-opcoes').innerHTML = ''; }
+      if (p === 'g') resetEnderecoGc();
       (e.rua ? $(p + '-num') : $(p + '-rua')).focus();
     } catch (x) {
       msg(alvoMsg, x.message === 'Failed to fetch' ? 'Não consegui consultar o CEP agora.' : 'CEP não encontrado.', true);
@@ -451,7 +516,7 @@ function autoCep(p) {
 
 async function acharEnderecoGc() {
   var rua = $('g-rua').value.trim(), num = $('g-num').value.trim(), cidade = $('g-cidade').value.trim();
-  msg('g-msg', ''); $('g-opcoes').innerHTML = ''; $('g-add').hidden = true; enderecoEscolhido = null;
+  msg('g-msg', ''); resetEnderecoGc();
   if (!rua || !cidade) { msg('g-msg', 'Preencha a rua e a cidade.', true); return; }
   var btn = $('g-achar'); btn.disabled = true; btn.textContent = 'Localizando...';
   try {
@@ -479,29 +544,86 @@ function escolherEndereco(i) {
   $('g-add').hidden = false;
 }
 
+function resetEnderecoGc() {
+  enderecoEscolhido = null; $('g-opcoes').innerHTML = '';
+  if (!editando) $('g-add').hidden = true;
+}
+function limparFormGc() {
+  ['g-nome', 'g-lider', 'g-dia', 'g-hora', 'g-cep', 'g-rua', 'g-num'].forEach(function (id) { $(id).value = ''; });
+  $('g-opcoes').innerHTML = ''; enderecoEscolhido = null;
+}
+/* separa "Rua X, 123 - Bairro - Cidade/UF" para GCs antigos que não guardaram rua e cidade separadas */
+function partesEndereco(g) {
+  if (g.rua) return { rua: g.rua, num: g.num || '', cidade: g.cidade || '' };
+  var p = (g.endereco || '').split(' - '), r = p[0] || '', num = '';
+  var m = r.match(/^(.*),\s*(\d+\w*)$/); if (m) { r = m[1]; num = m[2]; }
+  var c = p.length > 1 ? p[p.length - 1].replace('/', ', ') : '';
+  return { rua: r, num: num, cidade: c };
+}
+function entrarEdicao(id) {
+  var g = dados.gcs.find(function (x) { return x.id === id; }); if (!g) return;
+  limparFormGc();
+  var e = partesEndereco(g);
+  editando = { id: id, rua: e.rua, num: e.num, cidade: e.cidade };
+  $('g-nome').value = g.nome || ''; $('g-lider').value = g.lider || '';
+  $('g-dia').value = diaDoGc(g);
+  var h = g.hora || ((g.quando || '').match(/(\d{1,2})[:h](\d{2})?/) ? (function (m) { return m[1].padStart(2, '0') + ':' + (m[2] || '00'); })((g.quando || '').match(/(\d{1,2})[:h](\d{2})?/)) : '');
+  $('g-hora').value = h; if ($('g-hora').value !== h) $('g-hora').value = '';
+  $('g-cep').value = g.cep || ''; $('g-rua').value = e.rua; $('g-num').value = e.num; $('g-cidade').value = e.cidade;
+  $('g-editando').textContent = 'Editando: ' + g.nome; $('g-editando').hidden = false;
+  $('g-add').textContent = 'Salvar alterações'; $('g-add').hidden = false; $('g-cancelar').hidden = false;
+  msg('g-msg', 'Se mudar o endereço, toque em "Localizar endereço" antes de salvar.');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function sairEdicao() {
+  editando = null; limparFormGc();
+  $('g-editando').hidden = true; $('g-cancelar').hidden = true;
+  $('g-add').textContent = 'Adicionar GC'; $('g-add').hidden = true;
+}
+
 async function adicionarGc() {
-  var nome = $('g-nome').value.trim();
+  var nome = $('g-nome').value.trim(), dia = $('g-dia').value, hora = $('g-hora').value;
+  var rua = $('g-rua').value.trim(), num = $('g-num').value.trim(), cidade = $('g-cidade').value.trim();
   if (!nome) { msg('g-msg', 'Dê um nome ao GC.', true); $('g-nome').focus(); return; }
-  if (!enderecoEscolhido) { msg('g-msg', 'Localize o endereço antes de adicionar.', true); return; }
-  var e = enderecoEscolhido, num = $('g-num').value.trim();
-  var texto = e.s.temNumero || !num ? e.texto : e.s.linha1 + ', ' + num + (e.s.linha2 ? ' - ' + e.s.linha2 : '');
-  var g = { id: uid(), nome: nome, lider: $('g-lider').value.trim(), quando: $('g-quando').value.trim(),
-    endereco: texto, lat: e.lat, lng: e.lng };
-  try { await gravar('gcs', g); } catch (x) { msg('g-msg', erroFirebase(x), true); return; }
-  dados.gcs.push(g);
-  ['g-nome', 'g-lider', 'g-quando', 'g-rua', 'g-num'].forEach(function (id) { $(id).value = ''; });
-  $('g-opcoes').innerHTML = ''; $('g-add').hidden = true; enderecoEscolhido = null;
-  try { localStorage.setItem('gc-finder-cidade', $('g-cidade').value.trim()); } catch (x) {}
-  msg('g-msg', nome + ' adicionado.');
+  if (!dia) { msg('g-msg', 'Escolha o dia da semana do GC.', true); $('g-dia').focus(); return; }
+  var campos = { nome: nome, lider: $('g-lider').value.trim(), dia: dia, hora: hora, quando: quandoDe(dia, hora),
+                 cep: $('g-cep').value, rua: rua, num: num, cidade: cidade };
+  var e = enderecoEscolhido;
+  if (e) {
+    campos.endereco = e.s.temNumero || !num ? e.texto : e.s.linha1 + ', ' + num + (e.s.linha2 ? ' - ' + e.s.linha2 : '');
+    campos.lat = e.lat; campos.lng = e.lng;
+  }
+  var g;
+  if (editando) {
+    var mudou = rua !== editando.rua || num !== editando.num || cidade !== editando.cidade;
+    if (mudou && !e) { msg('g-msg', 'O endereço mudou. Toque em "Localizar endereço" para confirmar antes de salvar.', true); return; }
+    var atual = dados.gcs.find(function (x) { return x.id === editando.id; });
+    g = Object.assign({}, atual, campos);
+  } else {
+    if (!e) { msg('g-msg', 'Localize o endereço antes de adicionar.', true); return; }
+    g = Object.assign({ id: uid() }, campos);
+  }
+  var btn = $('g-add'); btn.disabled = true;
+  try { await gravar('gcs', g); } catch (x) { msg('g-msg', erroFirebase(x), true); btn.disabled = false; return; }
+  btn.disabled = false;
+  var eraEdicao = !!editando;
+  if (eraEdicao) dados.gcs = dados.gcs.map(function (x) { return x.id === g.id ? g : x; });
+  else dados.gcs.push(g);
+  try { localStorage.setItem('gc-finder-cidade', cidade); } catch (x) {}
+  sairEdicao();
+  $('g-cidade').value = cidade;
+  msg('g-msg', nome + (eraEdicao ? ' atualizado.' : ' adicionado.'));
+  ultimaBusca = null; $('b-res').innerHTML = '';
   renderGcs();
 }
 
 function renderGcs() {
   $('g-lista').innerHTML = dados.gcs.length ? dados.gcs.map(function (g) {
     var n = dados.pessoas.filter(function (p) { return p.gcId === g.id; }).length;
-    return '<li><div><strong>' + esc(g.nome) + '</strong><span class="sub">' + esc(g.endereco) + '<br>' +
+    return '<li><div><strong>' + esc(g.nome) + '</strong><span class="sub">' + (g.quando ? esc(g.quando) + '<br>' : '') + esc(g.endereco) + '<br>' +
            n + (n === 1 ? ' pessoa' : ' pessoas') + '</span></div>' +
-           '<button class="x" data-del-gc="' + g.id + '">Remover</button></li>';
+           '<div class="acoes-item"><button class="x editar" data-edit-gc="' + g.id + '">Editar</button>' +
+           '<button class="x" data-del-gc="' + g.id + '">Remover</button></div></li>';
   }).join('') : '<li class="vazio" style="display:block">Nenhum GC ainda. Cadastre o primeiro acima.</li>';
 }
 
@@ -533,7 +655,10 @@ document.addEventListener('click', async function (ev) {
   var op = t.closest && t.closest('[data-opcao]');
   if (op) escolherEndereco(+op.dataset.opcao);
   if (t.dataset.aba) trocarAba(t.dataset.aba);
+  if (t.dataset.editGc) entrarEdicao(t.dataset.editGc);
+  if (t.dataset.dia) alternarDia(t.dataset.dia);
   if (t.dataset.delGc && confirm('Remover este GC?')) {
+    if (editando && editando.id === t.dataset.delGc) sairEdicao();
     try { await apagar('gcs', t.dataset.delGc); } catch (e) { alert(erroFirebase(e)); return; }
     dados.gcs = dados.gcs.filter(function (g) { return g.id !== t.dataset.delGc; }); renderGcs();
   }
@@ -546,11 +671,13 @@ $('b-ir').addEventListener('click', buscar);
 ['b-rua', 'b-num', 'b-cidade'].forEach(function (id) { $(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') buscar(); }); });
 $('g-add').addEventListener('click', adicionarGc);
 $('p-filtro').addEventListener('change', renderPessoas);
+montarSelects();
 mascaraCep($('b-cep')); mascaraCep($('g-cep'));
 autoCep('b'); autoCep('g');
 $('g-achar').addEventListener('click', acharEnderecoGc);
 $('g-rua').addEventListener('keydown', function (e) { if (e.key === 'Enter') acharEnderecoGc(); });
-['g-rua', 'g-num', 'g-cidade'].forEach(function (id) { $(id).addEventListener('input', function () { $('g-add').hidden = true; enderecoEscolhido = null; $('g-opcoes').innerHTML = ''; }); });
+['g-rua', 'g-num', 'g-cidade'].forEach(function (id) { $(id).addEventListener('input', resetEnderecoGc); });
+$('g-cancelar').addEventListener('click', function () { sairEdicao(); msg('g-msg', ''); });
 
 /* ---------- login ---------- */
 function mostrarTela(qual) {
