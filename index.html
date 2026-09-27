@@ -21,7 +21,7 @@
   header h1{font-family:"Anton",Impact,sans-serif;font-weight:400;font-size:34px;line-height:1;margin:0;letter-spacing:.5px}
   header p{margin:4px 0 0;color:var(--ouro-escuro);font-weight:600}
   nav{display:flex;border-bottom:2px solid var(--tinta);margin:8px 0 22px}
-  nav button{flex:1;background:none;border:0;padding:12px 4px;font:600 16px "Barlow",sans-serif;color:#555;cursor:pointer;border-bottom:4px solid transparent;margin-bottom:-2px}
+  nav button{flex:1;min-width:0;background:none;border:0;padding:12px 4px;font:600 16px "Barlow",sans-serif;color:#555;cursor:pointer;border-bottom:4px solid transparent;margin-bottom:-2px}
   nav button[aria-selected="true"]{color:var(--tinta);border-bottom-color:var(--ouro)}
   section[hidden]{display:none}
   label{display:block;font-weight:600;margin:14px 0 6px}
@@ -49,6 +49,7 @@
   .placar .acoes .btn{margin:0;background:#262626;color:var(--branco)}
   .placar .acoes .btn.ouro{background:var(--ouro);color:var(--tinta)}
   .mapa{height:280px;border-radius:14px;margin-top:16px;border:2px solid var(--linha)}
+  .mapa.grande{height:calc(100vh - 230px);min-height:380px;margin-top:0}
   .linha-rua{display:grid;grid-template-columns:1fr 96px;gap:12px}
   .opcoes{margin-top:14px}
   .opcoes p{margin:0 0 8px;font-weight:600}
@@ -94,23 +95,35 @@
 
   <nav role="tablist">
     <button role="tab" aria-selected="true" data-aba="buscar">Buscar</button>
+    <button role="tab" aria-selected="false" data-aba="mapa">Mapa</button>
     <button role="tab" aria-selected="false" data-aba="pessoas">Pessoas</button>
     <button role="tab" aria-selected="false" data-aba="gcs">GCs</button>
   </nav>
 
   <!-- BUSCAR -->
   <section id="aba-buscar">
-    <label for="b-cep">CEP da pessoa</label>
+    <label for="b-cep">CEP da pessoa <small>(preenche a rua e a cidade)</small></label>
     <input id="b-cep" class="cep" inputmode="numeric" placeholder="00000-000" maxlength="9" autocomplete="postal-code">
+    <div class="linha-rua">
+      <div><label for="b-rua">Rua</label><input id="b-rua" placeholder="Rua das Flores" autocomplete="off"></div>
+      <div><label for="b-num">Número</label><input id="b-num" inputmode="numeric"></div>
+    </div>
+    <label for="b-cidade">Cidade</label>
+    <input id="b-cidade" placeholder="São Paulo, SP">
+    <p class="aviso">Com rua e número a distância fica mais certa. Só o CEP também funciona.</p>
     <div class="linha2">
       <div><label for="b-nome">Nome <small>(opcional)</small></label><input id="b-nome" autocomplete="name"></div>
-      <div><label for="b-num">Número <small>(opcional)</small></label><input id="b-num" inputmode="numeric"></div>
+      <div><label for="b-tel">WhatsApp <small>(opcional)</small></label><input id="b-tel" inputmode="tel" placeholder="(11) 99999-9999"></div>
     </div>
-    <label for="b-tel">WhatsApp <small>(opcional)</small></label>
-    <input id="b-tel" inputmode="tel" placeholder="(11) 99999-9999">
     <button class="btn" id="b-ir">Buscar GC mais próximo</button>
     <div id="b-msg"></div>
     <div id="b-res"></div>
+  </section>
+
+  <!-- MAPA -->
+  <section id="aba-mapa" hidden>
+    <p id="m-info" class="aviso" style="margin-top:0"></p>
+    <div id="mapa-todos" class="mapa grande"></div>
   </section>
 
   <!-- PESSOAS -->
@@ -127,6 +140,8 @@
       <div><label for="g-lider">Líder</label><input id="g-lider"></div>
       <div><label for="g-quando">Dia e horário</label><input id="g-quando" placeholder="Quarta, 20h"></div>
     </div>
+    <label for="g-cep">CEP <small>(opcional, preenche a rua e a cidade)</small></label>
+    <input id="g-cep" inputmode="numeric" placeholder="00000-000" maxlength="9">
     <div class="linha-rua">
       <div><label for="g-rua">Rua</label><input id="g-rua" placeholder="Rua das Flores" autocomplete="off"></div>
       <div><label for="g-num">Número</label><input id="g-num" inputmode="numeric"></div>
@@ -138,7 +153,6 @@
     <button class="btn ouro" id="g-add" hidden>Adicionar GC</button>
     <div id="g-msg"></div>
     <h3>GCs cadastrados</h3>
-    <div id="mapa-gcs" class="mapa"></div>
     <ul class="lista" id="g-lista"></ul>
   </section>
   </div>
@@ -244,9 +258,10 @@ async function localizar(cep, numero) {
 /* ---------- abas ---------- */
 function trocarAba(nome) {
   document.querySelectorAll('nav button').forEach(function (b) { b.setAttribute('aria-selected', b.dataset.aba === nome ? 'true' : 'false'); });
-  ['buscar', 'pessoas', 'gcs'].forEach(function (n) { $('aba-' + n).hidden = n !== nome; });
+  ['buscar', 'mapa', 'pessoas', 'gcs'].forEach(function (n) { $('aba-' + n).hidden = n !== nome; });
   if (nome === 'pessoas') renderPessoas();
-  if (nome === 'gcs') setTimeout(renderGcs, 30);
+  if (nome === 'gcs') renderGcs();
+  if (nome === 'mapa') setTimeout(desenharMapaTodos, 30);
   if (nome === 'buscar' && mapa) setTimeout(function () { mapa.invalidateSize(); }, 50);
 }
 
@@ -256,7 +271,19 @@ async function buscar() {
   if (!dados.gcs.length) { msg('b-msg', 'Nenhum GC cadastrado ainda. Adicione os GCs na aba GCs.', true); return; }
   var btn = $('b-ir'); btn.disabled = true; btn.textContent = 'Buscando...';
   try {
-    var loc = await localizar($('b-cep').value, $('b-num').value.trim());
+    var cep = $('b-cep').value, rua = $('b-rua').value.trim(), num = $('b-num').value.trim(), cidade = $('b-cidade').value.trim();
+    var loc = null;
+    if (rua && cidade) {
+      var res = await geocodificarEndereco(rua, num, cidade);
+      if (res.length) {
+        var s = resumoEndereco(res[0]);
+        var linha1 = s.temNumero || !num ? s.linha1 : s.linha1 + ', ' + num;
+        loc = { coord: { lat: +res[0].lat, lng: +res[0].lon }, texto: linha1 + (s.linha2 ? ' - ' + s.linha2 : ''),
+                precisao: s.temNumero ? 'numero' : 'rua', numPedido: num };
+      }
+    }
+    if (!loc && digitos(cep).length === 8) loc = await localizar(cep, num);
+    if (!loc) throw new Error(rua || cidade ? 'Não achei esse endereço. Confira a rua e a cidade, ou use o CEP.' : 'Informe o CEP ou a rua e a cidade.');
     var ranking = dados.gcs.map(function (g) { return { gc: g, km: distancia(loc.coord, g) }; })
                            .sort(function (a, b) { return a.km - b.km; });
     ultimaBusca = { loc: loc, ranking: ranking };
@@ -273,8 +300,11 @@ function renderResultado() {
   var texto = 'Olá' + (nome ? ' ' + nome.split(' ')[0] : '') + '! O GC mais perto de você é o ' + g.nome +
               (g.quando ? ', ' + g.quando : '') + (g.lider ? ', com ' + g.lider : '') + '. Endereço: ' + g.endereco + '. Rota: ' + rota;
   var wpp = 'https://wa.me/' + (tel ? (tel.length <= 11 ? '55' + tel : tel) : '') + '?text=' + encodeURIComponent(texto);
-  var aviso = r.loc.precisao === 'rua' ? '' :
-    '<p class="aviso">Localizei só pelo ' + r.loc.precisao + ' deste CEP, então a distância é aproximada.</p>';
+  var aviso = '';
+  if (r.loc.precisao === 'bairro' || r.loc.precisao === 'cidade')
+    aviso = '<p class="aviso">Localizei só pelo ' + r.loc.precisao + ' deste CEP, então a distância é aproximada. Coloque a rua e o número para ficar mais certo.</p>';
+  else if (r.loc.precisao === 'rua' && r.loc.numPedido)
+    aviso = '<p class="aviso">O mapa não tem o número ' + esc(r.loc.numPedido) + ' dessa rua, usei o meio da rua para calcular.</p>';
 
   var html =
     '<div class="placar">' +
@@ -318,7 +348,7 @@ async function salvarPessoa() {
   try { await gravar('pessoas', p); } catch (e) { msg('b-msg', erroFirebase(e), true); return; }
   dados.pessoas.unshift(p);
   msg('b-msg', nome + ' foi salvo no ' + r.ranking[0].gc.nome + '.');
-  ['b-cep', 'b-nome', 'b-num', 'b-tel'].forEach(function (id) { $(id).value = ''; });
+  ['b-cep', 'b-rua', 'b-nome', 'b-num', 'b-tel'].forEach(function (id) { $(id).value = ''; });
   $('b-res').innerHTML = ''; ultimaBusca = null;
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -347,19 +377,43 @@ function resumoEndereco(r) {
   return { linha1: linha1, linha2: [bairro, cidade + (uf ? '/' + uf : '')].filter(Boolean).join(' - '), temNumero: !!a.house_number };
 }
 
+async function geocodificarEndereco(rua, num, cidade) {
+  var base = { format: 'json', addressdetails: '1', countrycodes: 'br', limit: '5' };
+  var q = new URLSearchParams(Object.assign({}, base, { q: rua + (num ? ', ' + num : '') + ', ' + cidade }));
+  var res = await buscarJson('https://nominatim.openstreetmap.org/search?' + q.toString());
+  if (!res.length && num) {
+    q = new URLSearchParams(Object.assign({}, base, { q: rua + ', ' + cidade }));
+    res = await buscarJson('https://nominatim.openstreetmap.org/search?' + q.toString());
+  }
+  return res;
+}
+
+/* CEP preenche rua e cidade (prefixo 'b' = Buscar, 'g' = GCs) */
+function autoCep(p) {
+  $(p + '-cep').addEventListener('input', async function () {
+    var cep = digitos(this.value);
+    if (cep.length !== 8) return;
+    var alvoMsg = p + '-msg';
+    try {
+      var e = await enderecoDoCep(cep);
+      if (e.rua) $(p + '-rua').value = e.rua;
+      if (e.cidade) $(p + '-cidade').value = e.cidade + (e.uf ? ', ' + e.uf : '');
+      msg(alvoMsg, e.rua ? '' : 'Esse CEP é da cidade toda. Digite o nome da rua.');
+      if (p === 'g') { $('g-add').hidden = true; enderecoEscolhido = null; $('g-opcoes').innerHTML = ''; }
+      (e.rua ? $(p + '-num') : $(p + '-rua')).focus();
+    } catch (x) {
+      msg(alvoMsg, x.message === 'Failed to fetch' ? 'Não consegui consultar o CEP agora.' : 'CEP não encontrado.', true);
+    }
+  });
+}
+
 async function acharEnderecoGc() {
   var rua = $('g-rua').value.trim(), num = $('g-num').value.trim(), cidade = $('g-cidade').value.trim();
   msg('g-msg', ''); $('g-opcoes').innerHTML = ''; $('g-add').hidden = true; enderecoEscolhido = null;
   if (!rua || !cidade) { msg('g-msg', 'Preencha a rua e a cidade.', true); return; }
   var btn = $('g-achar'); btn.disabled = true; btn.textContent = 'Localizando...';
   try {
-    var base = { format: 'json', addressdetails: '1', countrycodes: 'br', limit: '5' };
-    var q = new URLSearchParams(Object.assign({}, base, { q: rua + (num ? ', ' + num : '') + ', ' + cidade }));
-    var res = await buscarJson('https://nominatim.openstreetmap.org/search?' + q.toString());
-    if (!res.length && num) {
-      q = new URLSearchParams(Object.assign({}, base, { q: rua + ', ' + cidade }));
-      res = await buscarJson('https://nominatim.openstreetmap.org/search?' + q.toString());
-    }
+    var res = await geocodificarEndereco(rua, num, cidade);
     if (!res.length) throw new Error('Não achei esse endereço. Confira o nome da rua e a cidade.');
     opcoesEndereco = res.map(function (r) {
       var s = resumoEndereco(r);
@@ -407,7 +461,6 @@ function renderGcs() {
            n + (n === 1 ? ' pessoa' : ' pessoas') + '</span></div>' +
            '<button class="x" data-del-gc="' + g.id + '">Remover</button></li>';
   }).join('') : '<li class="vazio" style="display:block">Nenhum GC ainda. Cadastre o primeiro acima.</li>';
-  desenharMapaGcs();
 }
 
 function novoMapa(id) {
@@ -417,14 +470,17 @@ function novoMapa(id) {
 }
 function marcarGc(m, g, destaque) {
   L.circleMarker([g.lat, g.lng], { radius: destaque ? 11 : 8, color: '#000', fillColor: destaque ? '#C9A227' : '#8A8A8A', fillOpacity: 1, weight: 2 })
-    .addTo(m).bindPopup('<strong>' + esc(g.nome) + '</strong><br>' + esc(g.quando || '') + (g.lider ? '<br>' + esc(g.lider) : ''));
+    .addTo(m).bindPopup('<strong>' + esc(g.nome) + '</strong>' + (g.quando ? '<br>' + esc(g.quando) : '') +
+      (g.lider ? '<br>Líder: ' + esc(g.lider) : '') + '<br>' + esc(g.endereco));
 }
-function desenharMapaGcs() {
-  var el = $('mapa-gcs');
-  if (!window.L || !dados.gcs.length) { el.hidden = true; return; }
+function desenharMapaTodos() {
+  var el = $('mapa-todos'), n = dados.gcs.length;
+  $('m-info').textContent = n ? n + (n === 1 ? ' GC cadastrado. Toque num ponto para ver os detalhes.' : ' GCs cadastrados. Toque num ponto para ver os detalhes.')
+                              : 'Nenhum GC cadastrado ainda. Cadastre na aba GCs.';
+  if (!window.L || !n) { el.hidden = true; return; }
   el.hidden = false;
   if (mapaGcs) { mapaGcs.remove(); mapaGcs = null; }
-  mapaGcs = novoMapa('mapa-gcs');
+  mapaGcs = novoMapa('mapa-todos');
   dados.gcs.forEach(function (g) { marcarGc(mapaGcs, g, true); });
   mapaGcs.fitBounds(dados.gcs.map(function (g) { return [g.lat, g.lng]; }), { padding: [30, 30], maxZoom: 15 });
 }
@@ -445,10 +501,11 @@ document.addEventListener('click', async function (ev) {
   }
 });
 $('b-ir').addEventListener('click', buscar);
-$('b-cep').addEventListener('keydown', function (e) { if (e.key === 'Enter') buscar(); });
+['b-rua', 'b-num', 'b-cidade'].forEach(function (id) { $(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') buscar(); }); });
 $('g-add').addEventListener('click', adicionarGc);
 $('p-filtro').addEventListener('change', renderPessoas);
-mascaraCep($('b-cep'));
+mascaraCep($('b-cep')); mascaraCep($('g-cep'));
+autoCep('b'); autoCep('g');
 $('g-achar').addEventListener('click', acharEnderecoGc);
 $('g-rua').addEventListener('keydown', function (e) { if (e.key === 'Enter') acharEnderecoGc(); });
 ['g-rua', 'g-num', 'g-cidade'].forEach(function (id) { $(id).addEventListener('input', function () { $('g-add').hidden = true; enderecoEscolhido = null; $('g-opcoes').innerHTML = ''; }); });
