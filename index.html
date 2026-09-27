@@ -76,6 +76,8 @@
   .vazio{padding:22px;border:1px dashed var(--linha);border-radius:14px;text-align:center;color:var(--suave)}
   .aviso{font-size:14px;color:var(--suave);margin-top:10px}
   #b-res .placar{margin-top:22px}
+  #b-res .titulo-lista{margin-top:22px}
+  a.x{text-decoration:none;white-space:nowrap}
   @media (prefers-reduced-motion:no-preference){.placar{animation:entra .35s ease-out}}
   @keyframes entra{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 
@@ -103,6 +105,7 @@
     #aba-buscar > *{grid-column:1}
     #aba-buscar > #b-res{grid-column:2;grid-row:1 / span 40}
     #b-res .placar{margin-top:0}
+    #b-res .titulo-lista{margin-top:0}
     #b-res:empty{display:flex;align-items:center;justify-content:center;min-height:420px;border:1px dashed var(--linha);border-radius:16px}
     #b-res:empty::before{content:"O GC mais próximo aparece aqui";color:var(--suave)}
     #b-res #mapa{height:420px}
@@ -169,6 +172,7 @@
     <div class="dias" id="b-dias"></div>
     <label>Tipo de GC <small>(nenhum marcado = todos)</small></label>
     <div class="dias" id="b-tipos"></div>
+    <p class="aviso">Sem endereço, a busca mostra todos os GCs do dia ou tipo marcado.</p>
     <button class="btn" id="b-ir">Buscar GC mais próximo</button>
     <div id="b-msg"></div>
     <div id="b-res"></div>
@@ -241,6 +245,7 @@ var db = getFirestore(fbApp);
 setPersistence(auth, browserLocalPersistence);
 var dados = { gcs: [], pessoas: [] };
 var ultimaBusca = null;
+var listaAtiva = false;
 var mapa = null;
 var mapaGcs = null;
 var enderecoEscolhido = null;
@@ -404,7 +409,10 @@ async function alternarTipo(x) { alternarNaLista(tiposFiltro, x, TIPOS); await a
 async function atualizarFiltros() {
   document.querySelectorAll('[data-dia]').forEach(function (b) { b.setAttribute('aria-pressed', diasFiltro.indexOf(b.dataset.dia) !== -1 ? 'true' : 'false'); });
   document.querySelectorAll('[data-tipo]').forEach(function (b) { b.setAttribute('aria-pressed', tiposFiltro.indexOf(b.dataset.tipo) !== -1 ? 'true' : 'false'); });
-  if (!ultimaBusca) return;
+  if (!ultimaBusca) {
+    if (listaAtiva) { msg('b-msg', ''); if (diasFiltro.length || tiposFiltro.length) mostrarLista(); else { listaAtiva = false; $('b-res').innerHTML = ''; } }
+    return;
+  }
   var loc = ultimaBusca.loc;
   msg('b-msg', '');
   if (!gcsDoFiltro().length) { $('b-res').innerHTML = ''; msg('b-msg', msgNenhum(), true); return; }
@@ -412,13 +420,46 @@ async function atualizarFiltros() {
   await calcularResultado(loc);
 }
 
+/* lista de GCs só pelos filtros (sem endereço) */
+function mostrarLista() {
+  listaAtiva = true;
+  var lista = gcsDoFiltro().slice().sort(function (a, b) {
+    return (DIAS.indexOf(diaDoGc(a)) - DIAS.indexOf(diaDoGc(b))) || (a.hora || '').localeCompare(b.hora || '') || a.nome.localeCompare(b.nome);
+  });
+  if (!lista.length) { $('b-res').innerHTML = ''; msg('b-msg', msgNenhum(), true); return; }
+  var titulo = 'GCs' + (tiposFiltro.length ? ' ' + textoTipos() : '') + (diasFiltro.length ? ' ' + textoDias() : '');
+  $('b-res').innerHTML =
+    '<h3 class="titulo-lista">' + esc(titulo) + '</h3>' +
+    '<p class="aviso" style="margin-top:0">' + lista.length + (lista.length === 1 ? ' GC encontrado.' : ' GCs encontrados.') + ' Coloque um endereço para ver qual fica mais perto.</p>' +
+    '<div id="mapa" class="mapa"></div>' +
+    '<ul class="lista">' + lista.map(function (g) {
+      var rotaMaps = 'https://www.google.com/maps/search/?api=1&query=' + g.lat + ',' + g.lng;
+      return '<li><div><strong>' + esc(g.nome) + '</strong><span class="sub">' +
+        [g.tipo ? 'GC de ' + esc(g.tipo) : '', esc(g.quando || '')].filter(Boolean).join(', ') +
+        (g.lider ? '<br>Líder: ' + esc(g.lider) : '') + '<br>' + esc(g.endereco) + '</span></div>' +
+        '<a class="x editar" href="' + rotaMaps + '" target="_blank" rel="noopener">Ver no mapa</a></li>';
+    }).join('') + '</ul>';
+  if (!window.L) { $('mapa').remove(); return; }
+  if (mapa) { mapa.remove(); mapa = null; }
+  mapa = novoMapa('mapa');
+  lista.forEach(function (g) { marcarGc(mapa, g, true); });
+  mapa.fitBounds(lista.map(function (g) { return [g.lat, g.lng]; }), { padding: [30, 30], maxZoom: 15 });
+}
+
 async function buscar() {
   msg('b-msg', ''); $('b-res').innerHTML = '';
   if (!dados.gcs.length) { msg('b-msg', 'Nenhum GC cadastrado ainda. Adicione os GCs na aba GCs.', true); return; }
   if (!gcsDoFiltro().length) { msg('b-msg', msgNenhum(), true); return; }
+  var cep = $('b-cep').value, rua = $('b-rua').value.trim(), num = $('b-num').value.trim(), cidade = $('b-cidade').value.trim();
+  var temEndereco = digitos(cep).length === 8 || (rua && cidade);
+  if (!temEndereco) {
+    if (diasFiltro.length || tiposFiltro.length) { ultimaBusca = null; mostrarLista(); return; }
+    msg('b-msg', rua || cidade ? 'Preencha a rua e a cidade, ou o CEP.' : 'Informe o CEP ou a rua e a cidade, ou marque um dia ou tipo de GC.', true);
+    return;
+  }
+  listaAtiva = false;
   var btn = $('b-ir'); btn.disabled = true; btn.textContent = 'Buscando...';
   try {
-    var cep = $('b-cep').value, rua = $('b-rua').value.trim(), num = $('b-num').value.trim(), cidade = $('b-cidade').value.trim();
     var loc = null;
     if (rua && cidade) {
       var res = await geocodificarEndereco(rua, num, cidade);
@@ -534,7 +575,7 @@ async function salvarPessoa() {
   dados.pessoas.unshift(p);
   msg('b-msg', nome + ' foi salvo no ' + r.ranking[0].gc.nome + '.');
   ['b-cep', 'b-rua', 'b-nome', 'b-num', 'b-tel'].forEach(function (id) { $(id).value = ''; });
-  $('b-res').innerHTML = ''; ultimaBusca = null;
+  $('b-res').innerHTML = ''; ultimaBusca = null; listaAtiva = false;
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -694,7 +735,7 @@ async function adicionarGc() {
   sairEdicao();
   $('g-cidade').value = cidade;
   msg('g-msg', nome + (eraEdicao ? ' atualizado.' : ' adicionado.'));
-  ultimaBusca = null; $('b-res').innerHTML = '';
+  ultimaBusca = null; listaAtiva = false; $('b-res').innerHTML = '';
   renderGcs();
 }
 
